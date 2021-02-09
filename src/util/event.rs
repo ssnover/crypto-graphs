@@ -21,7 +21,6 @@ pub struct Events {
     rx: mpsc::Receiver<Event<Key>>,
     input_handle: thread::JoinHandle<()>,
     ignore_exit_key: Arc<AtomicBool>,
-    tick_handle: thread::JoinHandle<()>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -65,19 +64,10 @@ impl Events {
                 }
             })
         };
-        let tick_handle = {
-            thread::spawn(move || loop {
-                if tx.send(Event::Tick).is_err() {
-                    break;
-                }
-                thread::sleep(config.tick_rate);
-            })
-        };
         Events {
             rx,
             ignore_exit_key,
             input_handle,
-            tick_handle,
         }
     }
 

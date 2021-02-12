@@ -55,11 +55,18 @@ impl App {
     }
 }
 
-fn main() -> Result<(), Box<dyn Error>> {
+struct MarketData {
+    pub price_data: Vec<(f64, f64)>,
+    pub min_time: f64,
+    pub max_time: f64,
+    pub min_usd: f64,
+    pub max_usd: f64,
+}
+    
 
-    let query_url = "https://api.coingecko.com/api/v3/coins/helium/market_chart?vs_currency=usd&days=3".to_string();
-    let client = Client::new();
-    let response = client
+fn retrieve_market_data(token: String) -> Result<MarketData, Box<dyn Error>> {
+    let query_url = format!("https://api.coingecko.com/api/v3/coins/{}/market_chart?vs_currency=usd&days=3", token);
+    let response = Client::new()
         .get(&query_url)
         .header("accept", "application/json")
         .send()
@@ -68,32 +75,45 @@ fn main() -> Result<(), Box<dyn Error>> {
         .unwrap();
     let response_json: serde_json::Value = serde_json::from_str(&response)?;
     let data = response_json["prices"].as_array().unwrap();
-    let mut hnt_data: Vec<(f64, f64)> = vec![];
+    let mut market_price_data: Vec<(f64, f64)> = vec![];
     for val in data {
         let secs = val.as_array().unwrap()[0].as_f64().unwrap() / 1000.;
         let value_in_usd = val.as_array().unwrap()[1].as_f64().unwrap();
-        hnt_data.push((secs, value_in_usd));
+        market_price_data.push((secs, value_in_usd));
     }
-    let hnt_data = hnt_data;
-    let mut min_time = hnt_data[0].0;
-    let mut min_usd = hnt_data[0].1;
+    let market_price_data = market_price_data;
+
+    let mut min_time = market_price_data[0].0;
+    let mut min_usd = market_price_data[0].1;
     let mut max_time = min_time;
     let mut max_usd = min_usd;
 
-    for datum in &hnt_data {
-        if datum.0 < min_time {
-            min_time = datum.0;
+    for elem in &market_price_data {
+        if elem.0 < min_time {
+            min_time = elem.0;
         }
-        if datum.0 > max_time {
-            max_time = datum.0;
+        if elem.0 > max_time {
+            max_time = elem.0;
         }
-        if datum.1 < min_usd {
-            min_usd = datum.1;
+        if elem.1 < min_usd {
+            min_usd = elem.1;
         }
-        if datum.1 > max_usd {
-            max_usd = datum.1;
+        if elem.1 > max_usd {
+            max_usd = elem.1;
         }
     }
+
+    Ok( MarketData { price_data: market_price_data,
+        min_time: min_time,
+        max_time: max_time,
+        min_usd: min_usd,
+        max_usd: max_usd })
+}
+
+fn main() -> Result<(), Box<dyn Error>> {
+
+    let hnt_data = retrieve_market_data("helium".to_string()).unwrap();
+    let ada_data = retrieve_market_data("cardano".to_string()).unwrap();
 
     // Terminal initialization
     let stdout = io::stdout().into_raw_mode()?;
@@ -125,12 +145,12 @@ fn main() -> Result<(), Box<dyn Error>> {
                 .marker(symbols::Marker::Braille)
                 .style(Style::default().fg(Color::LightBlue))
                 .graph_type(GraphType::Line)
-                .data(&hnt_data)];
+                .data(&hnt_data.price_data)];
             let chart = Chart::new(datasets)
                 .block(
                     Block::default()
                         .title(Span::styled(
-                            "HNT vs USD",
+                            format!("HNT vs USD, Current Price: {:.4}", hnt_data.price_data[hnt_data.price_data.len()-1].1),
                             Style::default()
                                 .fg(Color::Cyan)
                                 .add_modifier(Modifier::BOLD),
@@ -139,9 +159,8 @@ fn main() -> Result<(), Box<dyn Error>> {
                 )
                 .x_axis(
                     Axis::default()
-                        .title("USD")
                         .style(Style::default().fg(Color::Gray))
-                        .bounds([min_time, max_time])
+                        .bounds([hnt_data.min_time, hnt_data.max_time])
                         .labels(vec![
                             Span::styled("-3d", Style::default().add_modifier(Modifier::BOLD)),
                             Span::raw("-1.5d"),
@@ -150,18 +169,56 @@ fn main() -> Result<(), Box<dyn Error>> {
                 )
                 .y_axis(
                     Axis::default()
-                        .title("HNT")
+                        .title("USD")
                         .style(Style::default().fg(Color::Gray))
-                        .bounds([min_usd, max_usd])
+                        .bounds([hnt_data.min_usd, hnt_data.max_usd])
                         .labels(vec![
-                            Span::styled(format!("{:.2}", min_usd), Style::default().add_modifier(Modifier::BOLD)),
-                            Span::raw(format!("{:.2}", (min_usd + max_usd) / 2.)),
-                            Span::styled(format!("{:.2}", max_usd), Style::default().add_modifier(Modifier::BOLD)),
+                            Span::styled(format!("{:.2}", hnt_data.min_usd), Style::default().add_modifier(Modifier::BOLD)),
+                            Span::raw(format!("{:.2}", (hnt_data.min_usd + hnt_data.max_usd) / 2.)),
+                            Span::styled(format!("{:.2}", hnt_data.max_usd), Style::default().add_modifier(Modifier::BOLD)),
                         ]),
                 );
             f.render_widget(chart, chunks[0]);
 
-            
+            let datasets = vec![Dataset::default()
+                .marker(symbols::Marker::Braille)
+                .style(Style::default().fg(Color::Red))
+                .graph_type(GraphType::Line)
+                .data(&ada_data.price_data)];
+            let chart = Chart::new(datasets)
+                .block(
+                    Block::default()
+                        .title(Span::styled(
+                            format!("ADA vs USD, Current Price: {:.4}", ada_data.price_data[ada_data.price_data.len()-1].1),
+                            Style::default()
+                                .fg(Color::Cyan)
+                                .add_modifier(Modifier::BOLD),
+                        ))
+                        .borders(Borders::ALL),
+                )
+                .x_axis(
+                    Axis::default()
+                        .style(Style::default().fg(Color::Gray))
+                        .bounds([ada_data.min_time, ada_data.max_time])
+                        .labels(vec![
+                            Span::styled("-3d", Style::default().add_modifier(Modifier::BOLD)),
+                            Span::raw("-1.5d"),
+                            Span::styled("Now", Style::default().add_modifier(Modifier::BOLD)),
+                        ]),
+                )
+                .y_axis(
+                    Axis::default()
+                        .title("USD")
+                        .style(Style::default().fg(Color::Gray))
+                        .bounds([ada_data.min_usd, ada_data.max_usd])
+                        .labels(vec![
+                            Span::styled(format!("{:.2}", ada_data.min_usd), Style::default().add_modifier(Modifier::BOLD)),
+                            Span::raw(format!("{:.2}", (ada_data.min_usd + ada_data.max_usd) / 2.)),
+                            Span::styled(format!("{:.2}", ada_data.max_usd), Style::default().add_modifier(Modifier::BOLD)),
+                        ]),
+                );
+            f.render_widget(chart, chunks[1]);
+
         })?;
 
         match events.next()? {
@@ -175,6 +232,6 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
         }
     }
-
+    
     Ok(())
 }
